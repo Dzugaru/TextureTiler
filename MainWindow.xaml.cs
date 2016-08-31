@@ -59,9 +59,10 @@ namespace TextureTiler
 
         private async void button_Click(object sender, RoutedEventArgs e)
         {
-            double blockQuotient = 0.5;
-            double overlapQuotient = 1.0 / 6;
-            int nSearchBlocks = 1000;
+            double blockQuotient = 0.33;
+            double overlapQuotient = 1.0 / 6;            
+            int quiltW = 8;
+            int quiltH = 8;
 
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Filter = "Images|*.jpg;*.png;*.jpeg;*.bmp";
@@ -82,7 +83,7 @@ namespace TextureTiler
                 int blockSize = (int)(Math.Min(w, h) * blockQuotient);
                 int overlap = (int)(overlapQuotient * blockSize);
 
-                Mat quilted = await Quilt(img, 2, 2, blockSize, overlap, nSearchBlocks);
+                Mat quilted = await Quilt(img, quiltH, quiltW, blockSize, overlap);
                 Mat quilted8U = new Mat();
                 quilted.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
 
@@ -130,12 +131,12 @@ namespace TextureTiler
             }
         }  
         
-        (Mat, int, int) GetRandomBlock(Mat img, int sz)
-        {
-            int x = rng.Next(img.Cols - sz + 1);
-            int y = rng.Next(img.Rows - sz + 1);
-            return (new Mat(img, new CvRect(x, y, sz, sz)), x, y);
-        }
+        //(Mat, int, int) GetRandomBlock(Mat img, int sz)
+        //{
+        //    int x = rng.Next(img.Cols - sz + 1);
+        //    int y = rng.Next(img.Rows - sz + 1);
+        //    return (new Mat(img, new CvRect(x, y, sz, sz)), x, y);
+        //}
 
         Mat GetBlock(Mat img, int x, int y, int sz)
         {
@@ -218,8 +219,8 @@ namespace TextureTiler
                 for (int i = blockSz - 1; i >= 0; i--)
                 {
                     //TODO: cut by x or x + 1?
-                    for (int j = x; j < overlap; j++)
-                        *(pMask + i * overlap + j) = 1;
+                    //for (int j = x; j < overlap; j++)
+                    //    *(pMask + i * overlap + j) = 1;
 
                     float l = mins[i, x];
                     float c = mins[i, x + 1];
@@ -234,9 +235,9 @@ namespace TextureTiler
 
             if (!vert) Cv2.Transpose(mask, mask);
             return mask;        
-        }
+        }        
 
-        async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap, int nSearchBlocks)
+        async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap)
         {
             int step = blockSize - overlap;
             Mat result = new Mat(overlap + step * h, overlap + step * w, MatType.CV_32FC3);
@@ -255,31 +256,39 @@ namespace TextureTiler
                     else left = new Mat(result, new CvRect((j - 1) * step, i * step, blockSize, blockSize));
 
                     var min = (err: double.MaxValue, x: 0, y: 0);
-                    for (int k = 0; k < nSearchBlocks; k++)
-                    {
-                        (Mat cb, int cx, int cy) = GetRandomBlock(src, blockSize);
-                        double err = 0;
-                        if (up != null) err += ErrorSum(OverlapError(up, cb, overlap, false));
-                        if (left != null) err += ErrorSum(OverlapError(left, cb, overlap, true));
-                        cb.Dispose();
-
-                        if(err < min.err)
+                    for (int cy = 0; cy < step; cy++)
+                        for (int cx = 0; cx < step; cx++)
                         {
-                            min.err = err;
-                            min.x = cx;
-                            min.y = cy;
+                            Mat cb = GetBlock(src, cx, cy, blockSize);
+                            double err = 0;
+                            if (up != null) err += ErrorSum(OverlapError(up, cb, overlap, false));
+                            if (left != null) err += ErrorSum(OverlapError(left, cb, overlap, true));
+                            cb.Dispose();
+
+                            if (err < min.err)
+                            {
+                                min.err = err;
+                                min.x = cx;
+                                min.y = cy;
+                            }
                         }
-                    }
 
                     //TODO: choose random block among a number of best within tolerance 
 
-                    Mat minBlock = GetBlock(src, min.x, min.y, blockSize);                   
+                    Mat minBlock = GetBlock(src, min.x, min.y, blockSize);
                     Mat maskUpLeft = null;
                     if (up != null)
                     {
                         Mat maskUp = GetMinCutMask(up, minBlock, overlap, false);
                         Mat maskUpRight = new Mat(maskUp, new CvRect(overlap, 0, step, overlap));
-                        maskUpLeft = new Mat(maskUp, new CvRect(0, 0, overlap, overlap));                       
+                        maskUpLeft = new Mat(maskUp, new CvRect(0, 0, overlap, overlap));
+
+                        //DEBUG    
+                        //if (i == 1 && j == 1)
+                        //{
+                        //    image.Source = ((Mat)(maskUp * 255)).ToWriteableBitmap();
+                        //    await Task.Delay(2000);
+                        //}
 
                         Mat blockUp = new Mat(src, new CvRect(min.x + overlap, min.y, step, overlap));
                         Mat resultUpDst = new Mat(result, new CvRect(j * step + overlap, i * step, step, overlap));
@@ -296,12 +305,37 @@ namespace TextureTiler
                         Mat maskLeftDown = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));
 
                         //DEBUG      
-                        //image.Source = ((Mat)(maskLeft * 255)).ToWriteableBitmap();
-                        //await Task.Delay(3000);
+                        //if (i == 1 && j == 1)
+                        //{
+                        //    image.Source = ((Mat)(maskLeft * 255)).ToWriteableBitmap();
+                        //    await Task.Delay(2000);
+                        //}
 
-                        Mat blockLeft = new Mat(src, new CvRect(min.x, min.y + overlap, overlap, step)); 
+                        Mat blockLeft = new Mat(src, new CvRect(min.x, min.y + overlap, overlap, step));
                         Mat resultLeftDst = new Mat(result, new CvRect(j * step, i * step + overlap, overlap, step));
                         blockLeft.CopyTo(resultLeftDst, maskLeftDown);
+
+                        if (maskUpLeft != null)
+                        {
+                            Mat maskLeftUp = new Mat(maskLeft, new CvRect(0, 0, overlap, overlap));
+                            Cv2.BitwiseAnd(maskUpLeft, maskLeftUp, maskUpLeft);
+
+                            //DEBUG 
+                            //if (i == 1 && j == 1)
+                            //{
+                            //    image.Source = ((Mat)(maskUpLeft * 255)).ToWriteableBitmap();
+                            //    await Task.Delay(5000);
+                            //}
+
+                            Mat blockCorner = new Mat(src, new CvRect(min.x, min.y, overlap, overlap));
+                            Mat resultCornerDst = new Mat(result, new CvRect(j * step, i * step, overlap, overlap));
+                            blockCorner.CopyTo(resultLeftDst, maskUpLeft);
+
+                            blockCorner.Dispose();
+                            resultCornerDst.Dispose();
+                            maskLeftUp.Dispose();
+                        }
+
                         blockLeft.Dispose();
                         resultLeftDst.Dispose();
                         maskLeftDown.Dispose();
@@ -309,13 +343,13 @@ namespace TextureTiler
                     }
 
                     if (maskUpLeft != null) maskUpLeft.Dispose();
-                               
 
-                    Mat blockCore = new Mat(src, new CvRect(min.x + overlap, min.y + overlap, step, step)); //GetBlock(src, min.x, min.y, blockSize);
-                    Mat resultCoreDst = new Mat(result, new CvRect(j * step + overlap, i * step + overlap, step, step));
-                    blockCore.CopyTo(resultCoreDst);
-                    blockCore.Dispose();
-                    resultCoreDst.Dispose();
+
+                    Mat blockCenter = new Mat(src, new CvRect(min.x + overlap, min.y + overlap, step, step)); //GetBlock(src, min.x, min.y, blockSize);
+                    Mat resultCenterDst = new Mat(result, new CvRect(j * step + overlap, i * step + overlap, step, step));
+                    blockCenter.CopyTo(resultCenterDst);
+                    blockCenter.Dispose();
+                    resultCenterDst.Dispose();
 
 
                     if (up != null) up.Dispose();
@@ -324,12 +358,17 @@ namespace TextureTiler
                     GC.Collect();
 
                     //DEBUG
-                    Mat quilted8U = new Mat();
-                    result.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
-
-                    WriteableBitmap quiltedBmp = quilted8U.ToWriteableBitmap();
-                    image.Source = quiltedBmp;
-                    await Task.Delay(1000);
+                    using (Mat quilted8U = new Mat())
+                    {
+                        result.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
+                        //NOTE: new Mat doesn't work, only Clone does!
+                        using (Mat quilted8UCrop = quilted8U.Clone(new CvRect(overlap, overlap, result.Cols - overlap, result.Rows - overlap)))
+                        {
+                            WriteableBitmap quiltedBmp = quilted8UCrop.ToWriteableBitmap();
+                            image.Source = quiltedBmp;
+                            await Task.Delay(100);
+                        }
+                    }
                 }
             }
 
