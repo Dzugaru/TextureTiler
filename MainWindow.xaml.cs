@@ -35,13 +35,24 @@ namespace TextureTiler
             rng = new Random();
 
             //DEBUG
+            //float[] data =
+            //{
+            //    2,1,2,3,
+            //    2,2,0,2,
+            //    2,0,2,2,
+            //    3,2,1,2
+            //};
+
+            //Mat testCut = new Mat(4, 4, MatType.CV_32FC1, data);
+            //GetVertMinCutMask(testCut, null, 4);
+
             //Mat m1 = new Mat(4, 4, MatType.CV_32FC3);
             //m1.SetTo(new Scalar(1, 0, 0));
 
             //Mat m2 = new Mat(4, 4, MatType.CV_32FC3);
             //m2.SetTo(new Scalar(0.5, 1, 0));
 
-            //double err = GetOverlapError(m1, m2, 2, true);
+            //double err = ErrorSum(OverlapError(m1, m2, 2, true));
         }
 
         private async void button_Click(object sender, RoutedEventArgs e)
@@ -69,7 +80,7 @@ namespace TextureTiler
                 int blockSize = (int)(Math.Min(w, h) * blockQuotient);
                 int overlap = (int)(overlapQuotient * blockSize);
 
-                Mat quilted = await Quilt(img, 8, 8, blockSize, overlap, nSearchBlocks);
+                Mat quilted = await Quilt(img, 2, 2, blockSize, overlap, nSearchBlocks);
                 Mat quilted8U = new Mat();
                 quilted.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
 
@@ -127,9 +138,14 @@ namespace TextureTiler
         Mat GetBlock(Mat img, int x, int y, int sz)
         {
             return new Mat(img, new CvRect(x, y, sz, sz));
+        }      
+        
+        double ErrorSum(Mat err)
+        {
+            return Cv2.Sum(err).Val0;
         }
         
-        double GetOverlapError(Mat b1, Mat b2, int overlap, bool vert)
+        Mat OverlapError(Mat b1, Mat b2, int overlap, bool vert)
         {
             int blockSz = b1.Cols;
 
@@ -146,33 +162,76 @@ namespace TextureTiler
             }
 
             Cv2.Subtract(o1, o2, o1);
-            Cv2.Multiply(o1, o1, o1);           
-                      
-            Scalar s = Cv2.Sum(o1);
-            double err = s.Val0 + s.Val1 + s.Val2;
+            Cv2.Multiply(o1, o1, o1);
+            
+            Mat o1ChVec = o1.Reshape(1, o1.Rows * o1.Cols);
+            Mat errVec = o1ChVec.Reduce(OpenCvSharp.ReduceDimension.Column, OpenCvSharp.ReduceOperation.Sum, -1);
+            Mat err = errVec.Reshape(1, o1.Rows);
 
+            o1ChVec.Dispose();
+            errVec.Dispose();
             o1.Dispose();
             o2.Dispose();          
                
             return err;            
         }
 
-        Mat GetGreedyVerticalOverlapMask(Mat b1, Mat b2, int overlap)
+        Mat GetMinCutMask(Mat b1, Mat b2, int overlap, bool vert)
         {
             int blockSz = b1.Cols;
 
-            Mat o1, o2;           
-            o1 = new Mat(b1, new CvRect(blockSz - overlap, 0, overlap, blockSz));
-            o2 = new Mat(b2, new CvRect(0, 0, overlap, blockSz));
+            //DEBUG
+            //Mat error = b1;
+            Mat error = OverlapError(b1, b2, overlap, vert);
+            if (!vert) Cv2.Transpose(error, error);
+            Mat mask = new Mat(blockSz, overlap, MatType.CV_8UC1, new Scalar(0));
 
-            var min = (err: double.MaxValue, x0: 0);
-            for(int x0 = 0; x0 <= overlap; x0++)
+            float[,] mins = new float[blockSz + 1, overlap + 2];
+            for (int i = 0; i < blockSz; i++)
+                mins[i + 1, 0] = mins[i + 1, overlap + 1] = float.MaxValue;            
+
+            unsafe
             {
-                double err = 0;
+                float* pData = (float*)error.Data;
+                byte* pMask = (byte*)mask.Data;
+
+                //Fill mins
+                for (int i = 0; i < blockSz; i++)
+                    for (int j = 0; j < overlap; j++)
+                    {
+                        float e = *(pData + i * overlap + j);
+                        mins[i + 1, j + 1] = e + Math.Min(Math.Min(mins[i, j], mins[i, j + 1]), mins[i, j + 2]);
+                    }
+
+                //Backtrack and fill mask  
+                int x = 0;
+                float min = float.MaxValue;
+                for (int j = 0; j < overlap; j++)
+                    if(mins[blockSz, j + 1] < min)
+                    {
+                        min = mins[blockSz, j + 1];
+                        x = j;
+                    }                
+
+                for (int i = blockSz - 1; i >= 0; i--)
+                {
+                    //TODO: cut by x or x + 1?
+                    for (int j = x; j < overlap; j++)
+                        *(pMask + i * overlap + j) = 1;
+
+                    float l = mins[i, x];
+                    float c = mins[i, x + 1];
+                    float r = mins[i, x + 2];
+
+                    if (l < c && l < r) x--;
+                    else if (r < c && r < l) x++;
+                }
             }
 
-            o1.Dispose();
-            o2.Dispose();
+            error.Dispose();
+
+            if (!vert) Cv2.Transpose(mask, mask);
+            return mask;        
         }
 
         async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap, int nSearchBlocks)
@@ -183,9 +242,9 @@ namespace TextureTiler
             result.SetTo(new Scalar(0, 0, 0));
             Mat up, left;
 
-            for (int i = 0; i < h; i++) //DEBUG
+            for (int i = 0; i < 1; i++) //DEBUG
             {
-                for (int j = 0; j < w; j++) //DEBUG
+                for (int j = 0; j < 2; j++) //DEBUG
                 {
                     if (i == 0) up = null;
                     else up = new Mat(result, new CvRect(j * step, (i - 1) * step, blockSize, blockSize));
@@ -198,8 +257,8 @@ namespace TextureTiler
                     {
                         (Mat cb, int cx, int cy) = GetRandomBlock(src, blockSize);
                         double err = 0;
-                        if (up != null) err += GetOverlapError(up, cb, overlap, false);
-                        if (left != null) err += GetOverlapError(left, cb, overlap, true);
+                        if (up != null) err += ErrorSum(OverlapError(up, cb, overlap, false));
+                        if (left != null) err += ErrorSum(OverlapError(left, cb, overlap, true));
                         cb.Dispose();
 
                         if(err < min.err)
