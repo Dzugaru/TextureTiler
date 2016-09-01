@@ -47,6 +47,11 @@ namespace TextureTiler
             //};
 
             //Mat testCut = new Mat(4, 4, MatType.CV_32FC1, data);
+
+            //float[,] testBack = new float[4,4];
+            //testCut.GetArray(0, 0, testBack);
+
+            //return;
             //GetVertMinCutMask(testCut, null, 4);
 
             //Mat m1 = new Mat(4, 4, MatType.CV_32FC3);
@@ -66,7 +71,7 @@ namespace TextureTiler
 
             //up8U.ConvertTo(up, MatType.CV_32FC3, 1.0 / 255);
             //src8U.ConvertTo(src, MatType.CV_32FC3, 1.0 / 255);
-            
+
 
             ////WriteableBitmap bmp = img8U.ToWriteableBitmap();
             ////image.Source = bmp;
@@ -124,7 +129,8 @@ namespace TextureTiler
         private async void button_Click(object sender, RoutedEventArgs e)
         {
             double blockQuotient = 0.5;
-            double overlapQuotient = 1.0 / 6;            
+            double overlapQuotient = 1.0 / 6;
+            float matchTolerance = 0.1f;
             int quiltW = 8;
             int quiltH = 8;
 
@@ -147,7 +153,7 @@ namespace TextureTiler
                 int blockSize = (int)(Math.Min(w, h) * blockQuotient);
                 int overlap = (int)(overlapQuotient * blockSize);
 
-                Mat quilted = await Quilt(img, quiltH, quiltW, blockSize, overlap);
+                Mat quilted = await Quilt(img, quiltH, quiltW, blockSize, overlap, matchTolerance);
                 Mat quilted8U = new Mat();
                 quilted.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
 
@@ -207,7 +213,7 @@ namespace TextureTiler
             return new Mat(img, new CvRect(x, y, sz, sz));
         }
 
-        (int, int) GetMatchingBlock(Mat src, Mat left, Mat top, int blockSize, int overlap, OpenCvSharp.MatchTemplateMethod matchMethod)
+        (int, int) GetMatchingBlock(Mat src, Mat left, Mat top, int blockSize, int overlap, OpenCvSharp.MatchTemplateMethod matchMethod, float tolerance = 0.1f)
         {
             Mat map = null;
             if (left != null)
@@ -239,23 +245,46 @@ namespace TextureTiler
                 search.Dispose();
             }
             else
-            {
-                //TODO: return random block
-                return (0, 0);
+            {                
+                return (rng.Next(src.Cols - blockSize + 1),
+                        rng.Next(src.Rows - blockSize + 1));
             }
 
-            //TODO: return random block within error tolerance
+            bool isMin = matchMethod == OpenCvSharp.MatchTemplateMethod.SqDiff || matchMethod == OpenCvSharp.MatchTemplateMethod.SqDiffNormed;
 
             double min, max;
-            CvPoint minLoc, maxLoc;
-            Cv2.MinMaxLoc(map, out min, out max, out minLoc, out maxLoc);
-            map.Dispose();
+            Cv2.MinMaxLoc(map, out min, out max);
+            List<(int, int)> candidates = new List<(int, int)>();
+            
+            //TODO: non-maximum supression? (many candidates can be near maximum which harms diversity)
+            unsafe
+            {
+                System.Diagnostics.Debug.Assert(map.IsContinuous());
+                float* pData = (float*)map.Data;
+                for (int i = 0; i < map.Rows; i++)                    
+                    for (int j = 0; j < map.Cols; j++)
+                    {
+                        float v = *(pData + i * map.Cols + j);
+                        if(isMin && v <= (1 + tolerance) * min ||
+                           !isMin && v >= (1 - tolerance) * max)
+                        {
+                            candidates.Add((j, i));
+                        }
+                    }
+            }
 
-            bool isMin = matchMethod == OpenCvSharp.MatchTemplateMethod.SqDiff || matchMethod == OpenCvSharp.MatchTemplateMethod.SqDiffNormed;           
+            System.Diagnostics.Debug.WriteLine(candidates.Count);
 
-            return (isMin ? minLoc.X : maxLoc.X, isMin ? minLoc.Y : maxLoc.Y);
+            return candidates[rng.Next(candidates.Count)];
+
+            //Single best
+            //double min, max;
+            //CvPoint minLoc, maxLoc;
+            //Cv2.MinMaxLoc(map, out min, out max, out minLoc, out maxLoc);
+            //map.Dispose();
+            //return (isMin ? minLoc.X : maxLoc.X, isMin ? minLoc.Y : maxLoc.Y);
         }
-        
+
         double ErrorSum(Mat err)
         {
             return Cv2.Sum(err).Val0;
@@ -297,6 +326,9 @@ namespace TextureTiler
 
             unsafe
             {
+                System.Diagnostics.Debug.Assert(error.IsContinuous());
+                System.Diagnostics.Debug.Assert(mask.IsContinuous());
+
                 float* pData = (float*)error.Data;
                 byte* pMask = (byte*)mask.Data;
 
@@ -348,7 +380,7 @@ namespace TextureTiler
             sm.Dispose();
         }
 
-        async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap)
+        async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap, float matchTolerance)
         {
             int step = blockSize - overlap;
             Mat result = new Mat(overlap + step * h, overlap + step * w, MatType.CV_32FC3);
@@ -367,7 +399,7 @@ namespace TextureTiler
                     else left = new Mat(result, new CvRect(j * step, i * step, overlap, blockSize));
 
 
-                    (int bx, int by) = GetMatchingBlock(src, left, top, blockSize, overlap, OpenCvSharp.MatchTemplateMethod.SqDiffNormed);
+                    (int bx, int by) = GetMatchingBlock(src, left, top, blockSize, overlap, OpenCvSharp.MatchTemplateMethod.SqDiff, matchTolerance);
 
                     //DEBUG
                     //System.Diagnostics.Debug.WriteLine($"{i} {j} {min.x} {min.y} {min.err}");
@@ -469,7 +501,7 @@ namespace TextureTiler
                         result.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);                       
                         WriteableBitmap quiltedBmp = quilted8U.ToWriteableBitmap();
                         image.Source = quiltedBmp;
-                        await Task.Delay(100);                       
+                        await Task.Delay(1);                       
                     }
                 }
             }
