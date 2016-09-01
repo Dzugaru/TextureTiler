@@ -19,6 +19,7 @@ using System.Windows.Shapes;
 using CvRect = OpenCvSharp.CPlusPlus.Rect;
 using CvPoint = OpenCvSharp.CPlusPlus.Point;
 using CvSize = OpenCvSharp.CPlusPlus.Size;
+using System.IO;
 
 
 //TODO: using using for Mats
@@ -55,14 +56,77 @@ namespace TextureTiler
             //m2.SetTo(new Scalar(0.5, 1, 0));
 
             //double err = ErrorSum(OverlapError(m1, m2, 2, true));
+
+            Mat up8U = Cv2.ImRead("up.png");
+            Mat src8U = Cv2.ImRead(@"F:\WORK\MilitarySim\Refs\5.png");
+            Mat up = new Mat(), src = new Mat();
+            double blockQuotient = 0.5;
+            double overlapQuotient = 1.0 / 6;
+
+
+            up8U.ConvertTo(up, MatType.CV_32FC3, 1.0 / 255);
+            src8U.ConvertTo(src, MatType.CV_32FC3, 1.0 / 255);
+            
+
+            //WriteableBitmap bmp = img8U.ToWriteableBitmap();
+            //image.Source = bmp;
+
+            int w = src.Cols;
+            int h = src.Rows;
+
+            int blockSize = (int)(Math.Min(w, h) * blockQuotient);
+            int overlap = (int)(overlapQuotient * blockSize);
+
+            //Mat myMap = new Mat(src.Rows - blockSize + 1, src.Cols - blockSize + 1, MatType.CV_32FC1);
+            //var min = (err: double.MaxValue, x: 0, y: 0);
+            //for (int cy = 0; cy < src.Rows - blockSize + 1; cy++)
+            //{
+            //    for (int cx = 0; cx < src.Cols - blockSize + 1; cx++)
+            //    {
+            //        Mat cb = GetBlock(src, cx, cy, blockSize);
+            //        double err = ErrorSum(OverlapError(up, cb, overlap, false, cx, cy));
+            //        //File.AppendAllText("log.txt", $"{cx} {cy} {err}\r\n");
+            //        cb.Dispose();
+            //        myMap.Set(cy, cx, (float)err);
+
+            //        if (err < min.err)
+            //        {
+            //            min.err = err;
+            //            min.x = cx;
+            //            min.y = cy;
+            //        }
+            //    }
+            //}
+            //myMap = myMap.Normalize(0, 1, OpenCvSharp.NormType.MinMax);
+            //SaveMat(myMap, "myMap.png");
+            //double tmin, tmax;
+            //CvPoint minLoc, maxLoc;
+            //Cv2.MinMaxLoc(myMap, out tmin, out tmax, out minLoc, out maxLoc);
+            //System.Diagnostics.Debug.WriteLine($"{maxLoc}");
+
+            Mat templ = up.Clone(new CvRect(0, blockSize - overlap, blockSize, overlap));
+            Mat search = new Mat(src, new CvRect(0, 0, src.Cols, src.Rows - blockSize + overlap));
+            Mat map = new Mat();
+            Cv2.MatchTemplate(search, templ, map, OpenCvSharp.MatchTemplateMethod.SqDiffNormed);
+
+            map = map.Normalize(0, 1, OpenCvSharp.NormType.MinMax);
+            map = 1 - map;
+            SaveMat(templ, "templ.png");
+            SaveMat(map, "map.png");
+
+            double min, max;
+            CvPoint minLoc, maxLoc;
+            Cv2.MinMaxLoc(map, out min, out max, out minLoc, out maxLoc);
+
+            System.Diagnostics.Debug.WriteLine($"{maxLoc}");
         }
 
         private async void button_Click(object sender, RoutedEventArgs e)
         {
-            double blockQuotient = 0.33;
+            double blockQuotient = 0.5;
             double overlapQuotient = 1.0 / 6;            
-            int quiltW = 8;
-            int quiltH = 8;
+            int quiltW = 2;
+            int quiltH = 3;
 
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Filter = "Images|*.jpg;*.png;*.jpeg;*.bmp";
@@ -148,7 +212,7 @@ namespace TextureTiler
             return Cv2.Sum(err).Val0;
         }
         
-        Mat OverlapError(Mat b1, Mat b2, int overlap, bool vert)
+        Mat OverlapError(Mat b1, Mat b2, int overlap, bool vert, int x = 0, int y = 0)
         {
             int blockSz = b1.Cols;
 
@@ -164,8 +228,12 @@ namespace TextureTiler
                 o2 = new Mat(b2, new CvRect(0, 0, blockSz, overlap));
             }
 
+            //SaveMat(o1, $"test/u{x}-{y}.png");
+            //if(x % 10 == 0) SaveMat(o2, $"test/c{y}-{x}.png");
+
             Cv2.Subtract(o1, o2, o1);
             Cv2.Multiply(o1, o1, o1);
+            //Cv2.Absdiff(o1, o2, o1);
             
             Mat o1ChVec = o1.Reshape(1, o1.Rows * o1.Cols);
             Mat errVec = o1ChVec.Reduce(OpenCvSharp.ReduceDimension.Column, OpenCvSharp.ReduceOperation.Sum, -1);
@@ -219,6 +287,7 @@ namespace TextureTiler
                 for (int i = blockSz - 1; i >= 0; i--)
                 {
                     //TODO: cut by x or x + 1?
+                    //DEBUG
                     //for (int j = x; j < overlap; j++)
                     //    *(pMask + i * overlap + j) = 1;
 
@@ -237,6 +306,14 @@ namespace TextureTiler
             return mask;        
         }        
 
+        void SaveMat(Mat mat, string filename)
+        {
+            Mat sm = new Mat();
+            mat.ConvertTo(sm, MatType.CV_8UC3, 255);
+            sm.SaveImage(filename);
+            sm.Dispose();
+        }
+
         async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap)
         {
             int step = blockSize - overlap;
@@ -249,6 +326,7 @@ namespace TextureTiler
             {
                 for (int j = 0; j < w; j++) //DEBUG
                 {
+                    //TODO: only need overlap region, not whole up or left block!
                     if (i == 0) up = null;
                     else up = new Mat(result, new CvRect(j * step, (i - 1) * step, blockSize, blockSize));
 
@@ -256,10 +334,21 @@ namespace TextureTiler
                     else left = new Mat(result, new CvRect((j - 1) * step, i * step, blockSize, blockSize));
 
                     var min = (err: double.MaxValue, x: 0, y: 0);
-                    for (int cy = 0; cy < step; cy++)
-                        for (int cx = 0; cx < step; cx++)
+
+                    for (int cy = 0; cy < src.Rows - blockSize + 1; cy++)
+                    {
+                        for (int cx = 0; cx < src.Cols - blockSize + 1; cx++)
                         {
                             Mat cb = GetBlock(src, cx, cy, blockSize);
+
+                            //if (i == 2 && j == 0)
+                            //{
+                            //    SaveMat(cb, "cb.png");
+                            //    SaveMat(up, "up.png");
+                            //    SaveMat(OverlapError(up, cb, overlap, false), "overlap.png");
+                            //    //SaveMat(left, "left.png");
+                            //}
+
                             double err = 0;
                             if (up != null) err += ErrorSum(OverlapError(up, cb, overlap, false));
                             if (left != null) err += ErrorSum(OverlapError(left, cb, overlap, true));
@@ -272,79 +361,87 @@ namespace TextureTiler
                                 min.y = cy;
                             }
                         }
+                    }
 
+
+                    //DEBUG
+                    System.Diagnostics.Debug.WriteLine($"{i} {j} {min.x} {min.y} {min.err}");
                     //TODO: choose random block among a number of best within tolerance 
 
                     Mat minBlock = GetBlock(src, min.x, min.y, blockSize);
                     Mat maskUpLeft = null;
+
+                    //Fixing up
+                    Mat maskUp;
                     if (up != null)
-                    {
-                        Mat maskUp = GetMinCutMask(up, minBlock, overlap, false);
-                        Mat maskUpRight = new Mat(maskUp, new CvRect(overlap, 0, step, overlap));
-                        maskUpLeft = new Mat(maskUp, new CvRect(0, 0, overlap, overlap));
+                        maskUp = GetMinCutMask(up, minBlock, overlap, false);
+                    else
+                        maskUp = new Mat(overlap, blockSize, MatType.CV_8UC1, new Scalar(1));                
+                    Mat maskUpRight = new Mat(maskUp, new CvRect(overlap, 0, step, overlap));
+                    maskUpLeft = new Mat(maskUp, new CvRect(0, 0, overlap, overlap));
 
-                        //DEBUG    
-                        //if (i == 1 && j == 1)
-                        //{
-                        //    image.Source = ((Mat)(maskUp * 255)).ToWriteableBitmap();
-                        //    await Task.Delay(2000);
-                        //}
+                    //DEBUG    
+                    //if (i == 1 && j == 1)
+                    //{
+                    //    image.Source = ((Mat)(maskUp * 255)).ToWriteableBitmap();
+                    //    await Task.Delay(2000);
+                    //}
 
-                        Mat blockUp = new Mat(src, new CvRect(min.x + overlap, min.y, step, overlap));
-                        Mat resultUpDst = new Mat(result, new CvRect(j * step + overlap, i * step, step, overlap));
-                        blockUp.CopyTo(resultUpDst, maskUpRight);
-                        blockUp.Dispose();
-                        resultUpDst.Dispose();
-                        maskUpRight.Dispose();
-                        maskUp.Dispose();
-                    }
+                    Mat blockUp = new Mat(src, new CvRect(min.x + overlap, min.y, step, overlap));
+                    Mat resultUpDst = new Mat(result, new CvRect(j * step + overlap, i * step, step, overlap));
+                    blockUp.CopyTo(resultUpDst, maskUpRight);
+                    blockUp.Dispose();
+                    resultUpDst.Dispose();
+                    maskUpRight.Dispose();
+                    maskUp.Dispose();
 
+                    //Fixing left
+                    Mat maskLeft;
                     if (left != null)
-                    {
-                        Mat maskLeft = GetMinCutMask(left, minBlock, overlap, true);
-                        Mat maskLeftDown = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));
+                        maskLeft = GetMinCutMask(left, minBlock, overlap, true);
+                    else
+                        maskLeft = new Mat(blockSize, overlap, MatType.CV_8UC1, new Scalar(1));
 
-                        //DEBUG      
-                        //if (i == 1 && j == 1)
-                        //{
-                        //    image.Source = ((Mat)(maskLeft * 255)).ToWriteableBitmap();
-                        //    await Task.Delay(2000);
-                        //}
+                    Mat maskLeftDown = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));
 
-                        Mat blockLeft = new Mat(src, new CvRect(min.x, min.y + overlap, overlap, step));
-                        Mat resultLeftDst = new Mat(result, new CvRect(j * step, i * step + overlap, overlap, step));
-                        blockLeft.CopyTo(resultLeftDst, maskLeftDown);
+                    //DEBUG      
+                    //if (i == 1 && j == 1)
+                    //{
+                    //    image.Source = ((Mat)(maskLeft * 255)).ToWriteableBitmap();
+                    //    await Task.Delay(2000);
+                    //}
 
-                        if (maskUpLeft != null)
-                        {
-                            Mat maskLeftUp = new Mat(maskLeft, new CvRect(0, 0, overlap, overlap));
-                            Cv2.BitwiseAnd(maskUpLeft, maskLeftUp, maskUpLeft);
+                    Mat blockLeft = new Mat(src, new CvRect(min.x, min.y + overlap, overlap, step));
+                    Mat resultLeftDst = new Mat(result, new CvRect(j * step, i * step + overlap, overlap, step));
+                    blockLeft.CopyTo(resultLeftDst, maskLeftDown);
+                    
+                    Mat maskLeftUp = new Mat(maskLeft, new CvRect(0, 0, overlap, overlap));
+                    Cv2.BitwiseAnd(maskUpLeft, maskLeftUp, maskUpLeft);
+                    maskLeftUp.Dispose();
 
-                            //DEBUG 
-                            //if (i == 1 && j == 1)
-                            //{
-                            //    image.Source = ((Mat)(maskUpLeft * 255)).ToWriteableBitmap();
-                            //    await Task.Delay(5000);
-                            //}
+                    blockLeft.Dispose();
+                    resultLeftDst.Dispose();
+                    maskLeftDown.Dispose();
+                    maskLeft.Dispose();
 
-                            Mat blockCorner = new Mat(src, new CvRect(min.x, min.y, overlap, overlap));
-                            Mat resultCornerDst = new Mat(result, new CvRect(j * step, i * step, overlap, overlap));
-                            blockCorner.CopyTo(resultLeftDst, maskUpLeft);
+                    //Fixing corner
+                    Mat blockCorner = new Mat(src, new CvRect(min.x, min.y, overlap, overlap));
+                    Mat resultCornerDst = new Mat(result, new CvRect(j * step, i * step, overlap, overlap));
+                    blockCorner.CopyTo(resultCornerDst, maskUpLeft);
 
-                            blockCorner.Dispose();
-                            resultCornerDst.Dispose();
-                            maskLeftUp.Dispose();
-                        }
+                    blockCorner.Dispose();
+                    resultCornerDst.Dispose();                   
+                    maskUpLeft.Dispose();
 
-                        blockLeft.Dispose();
-                        resultLeftDst.Dispose();
-                        maskLeftDown.Dispose();
-                        maskLeft.Dispose();
-                    }
-
-                    if (maskUpLeft != null) maskUpLeft.Dispose();
+                    //DEBUG 
+                    //if (i == 1 && j == 1)
+                    //{
+                    //    image.Source = ((Mat)(maskUpLeft * 255)).ToWriteableBitmap();
+                    //    await Task.Delay(5000);
+                    //}
 
 
+                    //Drawing center
                     Mat blockCenter = new Mat(src, new CvRect(min.x + overlap, min.y + overlap, step, step)); //GetBlock(src, min.x, min.y, blockSize);
                     Mat resultCenterDst = new Mat(result, new CvRect(j * step + overlap, i * step + overlap, step, step));
                     blockCenter.CopyTo(resultCenterDst);
@@ -360,14 +457,10 @@ namespace TextureTiler
                     //DEBUG
                     using (Mat quilted8U = new Mat())
                     {
-                        result.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
-                        //NOTE: new Mat doesn't work, only Clone does!
-                        using (Mat quilted8UCrop = quilted8U.Clone(new CvRect(overlap, overlap, result.Cols - overlap, result.Rows - overlap)))
-                        {
-                            WriteableBitmap quiltedBmp = quilted8UCrop.ToWriteableBitmap();
-                            image.Source = quiltedBmp;
-                            await Task.Delay(100);
-                        }
+                        result.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);                       
+                        WriteableBitmap quiltedBmp = quilted8U.ToWriteableBitmap();
+                        image.Source = quiltedBmp;
+                        await Task.Delay(1000);                       
                     }
                 }
             }
