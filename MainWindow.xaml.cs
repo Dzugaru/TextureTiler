@@ -143,6 +143,7 @@ namespace TextureTiler
             double blockQuotient = 0.5;
             double overlapQuotient = 1.0 / 6;
             float matchTolerance = 0.1f;
+            float seamSmooth = 0.1f;
             int quiltW = 8;
             int quiltH = 8;
 
@@ -165,7 +166,7 @@ namespace TextureTiler
                 int blockSize = (int)(Math.Min(w, h) * blockQuotient);
                 int overlap = (int)(overlapQuotient * blockSize);
 
-                Mat quilted = await Quilt(img, quiltH, quiltW, blockSize, overlap, matchTolerance);
+                Mat quilted = await Quilt(img, quiltH, quiltW, blockSize, overlap, matchTolerance, seamSmooth);
                 Mat quilted8U = new Mat();
                 quilted.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
 
@@ -302,7 +303,7 @@ namespace TextureTiler
             return Cv2.Sum(err).Val0;
         }
         
-        Mat OverlapError(Mat b1, Mat b2, int overlap, bool vert, int x = 0, int y = 0)
+        Mat OverlapErrorSurface(Mat b1, Mat b2, int overlap, bool vert, int x = 0, int y = 0)
         {
             //SaveMat(o1, $"test/u{x}-{y}.png");
             //if(x % 10 == 0) SaveMat(o2, $"test/c{y}-{x}.png");
@@ -324,11 +325,11 @@ namespace TextureTiler
             return err;            
         }
 
-        Mat GetMinCutMask(Mat b1, Mat b2, int blockSize, int overlap, bool vert)
+        Mat GetMinCutMask(Mat b1, Mat b2, int blockSize, int overlap, bool vert, float smooth)
         {           
             //DEBUG
             //Mat error = b1;
-            Mat error = OverlapError(b1, b2, overlap, vert);
+            Mat error = OverlapErrorSurface(b1, b2, overlap, vert);
             if (!vert) Cv2.Transpose(error, error);
             Mat mask = new Mat(blockSize, overlap, MatType.CV_32FC1, new Scalar(0));
 
@@ -366,8 +367,16 @@ namespace TextureTiler
                 {
                     //TODO: cut by x or x + 1?
                     //DEBUG
-                    for (int j = x; j < overlap; j++)
-                        *(pMask + i * overlap + j) = 1.0f;
+                    if (smooth == 0)
+                    {
+                        for (int j = x; j < overlap; j++)
+                            *(pMask + i * overlap + j) = 1.0f;
+                    }
+                    else
+                    {
+                        for (int j = 0; j < overlap; j++)
+                            *(pMask + i * overlap + j) = 1f / (1 + (float)Math.Exp(-(j - x) / (smooth * overlap)));
+                    }
 
                     float l = mins[i, x];
                     float c = mins[i, x + 1];
@@ -405,7 +414,7 @@ namespace TextureTiler
             multichannelMask.Dispose();
         }
 
-        async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap, float matchTolerance)
+        async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap, float matchTolerance, float seamSmooth)
         {
             int step = blockSize - overlap;
             Mat result = new Mat(overlap + step * h, overlap + step * w, MatType.CV_32FC3);
@@ -439,7 +448,7 @@ namespace TextureTiler
                     //Fixing up
                     Mat maskTop;
                     if (top != null)
-                        maskTop = GetMinCutMask(top, bTop, blockSize, overlap, false);
+                        maskTop = GetMinCutMask(top, bTop, blockSize, overlap, false, seamSmooth);
                     else
                         maskTop = new Mat(overlap, blockSize, MatType.CV_32FC1, new Scalar(1));
                     Mat maskTopRight = new Mat(maskTop, new CvRect(overlap, 0, step, overlap));
@@ -464,7 +473,7 @@ namespace TextureTiler
                     //Fixing left
                     Mat maskLeft;
                     if (left != null)
-                        maskLeft = GetMinCutMask(left, bLeft, blockSize, overlap, true);
+                        maskLeft = GetMinCutMask(left, bLeft, blockSize, overlap, true, seamSmooth);
                     else
                         maskLeft = new Mat(blockSize, overlap, MatType.CV_32FC1, new Scalar(1));
                     Mat maskLeftBottom = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));
