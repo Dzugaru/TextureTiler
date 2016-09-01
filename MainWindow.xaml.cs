@@ -62,15 +62,27 @@ namespace TextureTiler
 
             //double err = ErrorSum(OverlapError(m1, m2, 2, true));
 
-            //Mat up8U = Cv2.ImRead("up.png");
+            //Mat up8U = Cv2.ImRead(@"F:\WORK\MilitarySim\Refs\4.png");
             //Mat src8U = Cv2.ImRead(@"F:\WORK\MilitarySim\Refs\5.png");
             //Mat up = new Mat(), src = new Mat();
-            //double blockQuotient = 0.5;
-            //double overlapQuotient = 1.0 / 6;
-
+            ////double blockQuotient = 0.5;
+            ////double overlapQuotient = 1.0 / 6;
 
             //up8U.ConvertTo(up, MatType.CV_32FC3, 1.0 / 255);
             //src8U.ConvertTo(src, MatType.CV_32FC3, 1.0 / 255);
+
+            //int w = src.Cols;
+            //int h = src.Rows;
+
+            //Cv2.Resize(up, up, src.Size());
+
+            //Mat mask = new Mat(src.Rows, src.Cols, MatType.CV_32FC1, new Scalar(0.5));
+
+            //BlendByMask(src, up, mask);
+
+            //SaveMat(src, "testBlend.png");
+
+            //return;
 
 
             ////WriteableBitmap bmp = img8U.ToWriteableBitmap();
@@ -318,7 +330,7 @@ namespace TextureTiler
             //Mat error = b1;
             Mat error = OverlapError(b1, b2, overlap, vert);
             if (!vert) Cv2.Transpose(error, error);
-            Mat mask = new Mat(blockSize, overlap, MatType.CV_8UC1, new Scalar(0));
+            Mat mask = new Mat(blockSize, overlap, MatType.CV_32FC1, new Scalar(0));
 
             float[,] mins = new float[blockSize + 1, overlap + 2];
             for (int i = 0; i < blockSize; i++)
@@ -330,7 +342,7 @@ namespace TextureTiler
                 System.Diagnostics.Debug.Assert(mask.IsContinuous());
 
                 float* pData = (float*)error.Data;
-                byte* pMask = (byte*)mask.Data;
+                float* pMask = (float*)mask.Data;
 
                 //Fill mins
                 for (int i = 0; i < blockSize; i++)
@@ -355,7 +367,7 @@ namespace TextureTiler
                     //TODO: cut by x or x + 1?
                     //DEBUG
                     for (int j = x; j < overlap; j++)
-                        *(pMask + i * overlap + j) = 1;
+                        *(pMask + i * overlap + j) = 1.0f;
 
                     float l = mins[i, x];
                     float c = mins[i, x + 1];
@@ -378,6 +390,19 @@ namespace TextureTiler
             mat.ConvertTo(sm, MatType.CV_8UC3, 255);
             sm.SaveImage(filename);
             sm.Dispose();
+        }
+
+        void BlendByMask(Mat dst, Mat src, Mat mask)
+        {
+            Mat maskedSrc = new Mat();
+            Mat multichannelMask = new Mat();
+            Cv2.Merge(new Mat[] { mask, mask, mask }, multichannelMask);
+
+            Cv2.Multiply(src, multichannelMask, maskedSrc);
+            Cv2.Multiply(dst, new Scalar(1,1,1) - multichannelMask, dst);
+            Cv2.Add(dst, maskedSrc, dst);
+            maskedSrc.Dispose();
+            multichannelMask.Dispose();
         }
 
         async Task<Mat> Quilt(Mat src, int h, int w, int blockSize, int overlap, float matchTolerance)
@@ -416,7 +441,7 @@ namespace TextureTiler
                     if (top != null)
                         maskTop = GetMinCutMask(top, bTop, blockSize, overlap, false);
                     else
-                        maskTop = new Mat(overlap, blockSize, MatType.CV_8UC1, new Scalar(1));                
+                        maskTop = new Mat(overlap, blockSize, MatType.CV_32FC1, new Scalar(1));
                     Mat maskTopRight = new Mat(maskTop, new CvRect(overlap, 0, step, overlap));
                     maskTopLeft = new Mat(maskTop, new CvRect(0, 0, overlap, overlap));
 
@@ -429,7 +454,8 @@ namespace TextureTiler
 
                     Mat bTopRight = new Mat(bTop, new CvRect(overlap, 0, step, overlap));
                     Mat topRight = new Mat(result, new CvRect(j * step + overlap, i * step, step, overlap));
-                    bTopRight.CopyTo(topRight, maskTopRight);
+                    //bTopRight.CopyTo(topRight, maskTopRight);
+                    BlendByMask(topRight, bTopRight, maskTopRight);
                     bTopRight.Dispose();
                     topRight.Dispose();
                     maskTopRight.Dispose();
@@ -440,7 +466,7 @@ namespace TextureTiler
                     if (left != null)
                         maskLeft = GetMinCutMask(left, bLeft, blockSize, overlap, true);
                     else
-                        maskLeft = new Mat(blockSize, overlap, MatType.CV_8UC1, new Scalar(1));
+                        maskLeft = new Mat(blockSize, overlap, MatType.CV_32FC1, new Scalar(1));
                     Mat maskLeftBottom = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));
 
                     //DEBUG      
@@ -452,10 +478,11 @@ namespace TextureTiler
 
                     Mat bLeftBottom = new Mat(bLeft, new CvRect(0, overlap, overlap, step));
                     Mat leftBottom = new Mat(result, new CvRect(j * step, i * step + overlap, overlap, step));
-                    bLeftBottom.CopyTo(leftBottom, maskLeftBottom);
-                    
+                    //bLeftBottom.CopyTo(leftBottom, maskLeftBottom);
+                    BlendByMask(leftBottom, bLeftBottom, maskLeftBottom);
+
                     Mat maskLeftTop = new Mat(maskLeft, new CvRect(0, 0, overlap, overlap));
-                    Cv2.BitwiseAnd(maskTopLeft, maskLeftTop, maskTopLeft);
+                    Cv2.Multiply(maskTopLeft, maskLeftTop, maskTopLeft);
                     maskLeftTop.Dispose();
                     bLeftBottom.Dispose();
                     leftBottom.Dispose();
@@ -465,7 +492,8 @@ namespace TextureTiler
                     //Fixing corner
                     Mat bTopLeft = new Mat(block, new CvRect(0, 0, overlap, overlap));
                     Mat topLeft = new Mat(result, new CvRect(j * step, i * step, overlap, overlap));
-                    bTopLeft.CopyTo(topLeft, maskTopLeft);
+                    //bTopLeft.CopyTo(topLeft, maskTopLeft);
+                    BlendByMask(topLeft, bTopLeft, maskTopLeft);
 
                     bTopLeft.Dispose();
                     topLeft.Dispose();                   
