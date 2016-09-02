@@ -15,22 +15,26 @@ namespace TextureTiler
         int overlap, step, qw, qh, qx, qy;
         Mat quilt;
 
-        Random rng;
+        Random rng = new Random();
         public int BlockSize { get; set; } = 32;
         public float OverlapQuotient { get; set; } = 1f / 6;
         public float MatchTolerance { get; set; } = 0.1f;
         public float SeamSmooth { get; set; } = 0.1f;
         public List<Mat> Sources { get; set; } = new List<Mat>();
 
-        Mat Quilt(int w, int h)
+        public Mat Result { get { return quilt; } }
+
+        public Mat Quilt(int w, int h, int rngSeed = -1)
         {
-            Start(w, h);
+            Start(w, h, rngSeed);
             while (Step()) ;
             return quilt;
         }
 
-        void Start(int w, int h)
+        public void Start(int w, int h, int rngSeed = -1)
         {
+            if (rngSeed >= 0) rng = new Random(rngSeed);
+
             qw = w;
             qh = h;
             qx = qy = 0;
@@ -39,7 +43,7 @@ namespace TextureTiler
             quilt = new Mat(overlap + step * h, overlap + step * w, MatType.CV_32FC3);
         }
 
-        bool Step()
+        public bool Step()
         {
             Mat top, left;
             if (qy == 0) top = null;
@@ -49,37 +53,23 @@ namespace TextureTiler
             else left = new Mat(quilt, new CvRect(qx * step, qy * step, overlap, BlockSize));
 
 
-            (int bx, int by) = GetMatchingBlock(src, left, top, blockSize, overlap, OpenCvSharp.MatchTemplateMethod.SqDiff, matchTolerance);
-
-            //DEBUG
-            //System.Diagnostics.Debug.WriteLine($"{i} {j} {min.x} {min.y} {min.err}");
-            //TODO: choose random block among a number of best within tolerance 
-
-            Mat block = GetBlock(src, bx, by, blockSize);
+            Mat block = GetMatchingBlock(left, top, OpenCvSharp.MatchTemplateMethod.SqDiff);
             Mat maskTopLeft = null;
 
-            Mat bTop = new Mat(block, new CvRect(0, 0, blockSize, overlap));
-            Mat bLeft = new Mat(block, new CvRect(0, 0, overlap, blockSize));
+            Mat bTop = new Mat(block, new CvRect(0, 0, BlockSize, overlap));
+            Mat bLeft = new Mat(block, new CvRect(0, 0, overlap, BlockSize));
 
             //Fixing up
             Mat maskTop;
             if (top != null)
-                maskTop = GetMinCutMask(top, bTop, blockSize, overlap, false, seamSmooth);
+                maskTop = GetMinCutMask(top, bTop, false);
             else
-                maskTop = new Mat(overlap, blockSize, MatType.CV_32FC1, new Scalar(1));
+                maskTop = new Mat(overlap, BlockSize, MatType.CV_32FC1, new Scalar(1));
             Mat maskTopRight = new Mat(maskTop, new CvRect(overlap, 0, step, overlap));
-            maskTopLeft = new Mat(maskTop, new CvRect(0, 0, overlap, overlap));
-
-            //DEBUG    
-            //if (i == 1 && j == 1)
-            //{
-            //    image.Source = ((Mat)(maskUp * 255)).ToWriteableBitmap();
-            //    await Task.Delay(2000);
-            //}
+            maskTopLeft = new Mat(maskTop, new CvRect(0, 0, overlap, overlap));           
 
             Mat bTopRight = new Mat(bTop, new CvRect(overlap, 0, step, overlap));
-            Mat topRight = new Mat(result, new CvRect(j * step + overlap, i * step, step, overlap));
-            //bTopRight.CopyTo(topRight, maskTopRight);
+            Mat topRight = new Mat(quilt, new CvRect(qx * step + overlap, qy * step, step, overlap));            
             BlendByMask(topRight, bTopRight, maskTopRight);
             bTopRight.Dispose();
             topRight.Dispose();
@@ -89,21 +79,13 @@ namespace TextureTiler
             //Fixing left
             Mat maskLeft;
             if (left != null)
-                maskLeft = GetMinCutMask(left, bLeft, blockSize, overlap, true, seamSmooth);
+                maskLeft = GetMinCutMask(left, bLeft, true);
             else
-                maskLeft = new Mat(blockSize, overlap, MatType.CV_32FC1, new Scalar(1));
-            Mat maskLeftBottom = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));
-
-            //DEBUG      
-            //if (i == 1 && j == 1)
-            //{
-            //    image.Source = ((Mat)(maskLeft * 255)).ToWriteableBitmap();
-            //    await Task.Delay(2000);
-            //}
+                maskLeft = new Mat(BlockSize, overlap, MatType.CV_32FC1, new Scalar(1));
+            Mat maskLeftBottom = new Mat(maskLeft, new CvRect(0, overlap, overlap, step));           
 
             Mat bLeftBottom = new Mat(bLeft, new CvRect(0, overlap, overlap, step));
-            Mat leftBottom = new Mat(result, new CvRect(j * step, i * step + overlap, overlap, step));
-            //bLeftBottom.CopyTo(leftBottom, maskLeftBottom);
+            Mat leftBottom = new Mat(quilt, new CvRect(qx * step, qy * step + overlap, overlap, step));            
             BlendByMask(leftBottom, bLeftBottom, maskLeftBottom);
 
             Mat maskLeftTop = new Mat(maskLeft, new CvRect(0, 0, overlap, overlap));
@@ -116,25 +98,16 @@ namespace TextureTiler
 
             //Fixing corner
             Mat bTopLeft = new Mat(block, new CvRect(0, 0, overlap, overlap));
-            Mat topLeft = new Mat(result, new CvRect(j * step, i * step, overlap, overlap));
-            //bTopLeft.CopyTo(topLeft, maskTopLeft);
+            Mat topLeft = new Mat(quilt, new CvRect(qx * step, qy * step, overlap, overlap));            
             BlendByMask(topLeft, bTopLeft, maskTopLeft);
 
             bTopLeft.Dispose();
             topLeft.Dispose();
             maskTopLeft.Dispose();
 
-            //DEBUG 
-            //if (i == 1 && j == 1)
-            //{
-            //    image.Source = ((Mat)(maskUpLeft * 255)).ToWriteableBitmap();
-            //    await Task.Delay(5000);
-            //}
-
-
             //Drawing center
             Mat bBottomRight = new Mat(block, new CvRect(overlap, overlap, step, step));
-            Mat bottomRight = new Mat(result, new CvRect(j * step + overlap, i * step + overlap, step, step));
+            Mat bottomRight = new Mat(quilt, new CvRect(qx * step + overlap, qy * step + overlap, step, step));
             bBottomRight.CopyTo(bottomRight);
             bBottomRight.Dispose();
             bottomRight.Dispose();
@@ -144,9 +117,7 @@ namespace TextureTiler
 
             block.Dispose();
             bTop.Dispose();
-            bLeft.Dispose();
-
-            GC.Collect();
+            bLeft.Dispose();            
 
             qx++;
             if(qx >= qw)
@@ -176,7 +147,20 @@ namespace TextureTiler
             return err;
         }
 
-        Mat GetMinCutMask(Mat b1, Mat b2, bool vert, float smooth)
+        void BlendByMask(Mat dst, Mat src, Mat mask)
+        {
+            Mat maskedSrc = new Mat();
+            Mat multichannelMask = new Mat();
+            Cv2.Merge(new Mat[] { mask, mask, mask }, multichannelMask);
+
+            Cv2.Multiply(src, multichannelMask, maskedSrc);
+            Cv2.Multiply(dst, new Scalar(1, 1, 1) - multichannelMask, dst);
+            Cv2.Add(dst, maskedSrc, dst);
+            maskedSrc.Dispose();
+            multichannelMask.Dispose();
+        }
+
+        Mat GetMinCutMask(Mat b1, Mat b2, bool vert)
         {            
             Mat error = OverlapErrorSurface(b1, b2, vert);
             if (!vert) Cv2.Transpose(error, error);
@@ -214,7 +198,7 @@ namespace TextureTiler
 
                 for (int i = BlockSize - 1; i >= 0; i--)
                 {                    
-                    if (smooth == 0)
+                    if (SeamSmooth == 0)
                     {
                         for (int j = x; j < overlap; j++)
                             *(pMask + i * overlap + j) = 1.0f;
@@ -222,7 +206,7 @@ namespace TextureTiler
                     else
                     {
                         for (int j = 0; j < overlap; j++)
-                            *(pMask + i * overlap + j) = 1f / (1 + (float)Math.Exp(-(j - x) / (smooth * overlap)));
+                            *(pMask + i * overlap + j) = 1f / (1 + (float)Math.Exp(-(j - x) / (SeamSmooth * overlap)));
                     }
 
                     float l = mins[i, x];
@@ -299,25 +283,32 @@ namespace TextureTiler
             List<(int srcI, int x, int y)> candidates = new List<(int srcI, int x, int y)>();
 
             //TODO: non-maximum supression? (many candidates can be near maximum which harms diversity)
-            //unsafe
-            //{
-            //    System.Diagnostics.Debug.Assert(map.IsContinuous());
-            //    float* pData = (float*)map.Data;
-            //    for (int i = 0; i < map.Rows; i++)
-            //        for (int j = 0; j < map.Cols; j++)
-            //        {
-            //            float v = *(pData + i * map.Cols + j);
-            //            if (isMin && v <= (1 + MatchTolerance) * min ||
-            //               !isMin && v >= (1 - MatchTolerance) * max)
-            //            {
-            //                candidates.Add((j, i));
-            //            }
-            //        }
-            //}
+            unsafe
+            {
+                for (int k = 0; k < maps.Count; k++)
+                {
+                    Mat map = maps[k];
+                    System.Diagnostics.Debug.Assert(map.IsContinuous());
+                    float* pData = (float*)map.Data;
+                    for (int i = 0; i < map.Rows; i++)
+                        for (int j = 0; j < map.Cols; j++)
+                        {
+                            float v = *(pData + i * map.Cols + j);
+                            if (isMin && v <= (1 + MatchTolerance) * best ||
+                                !isMin && v >= (1 - MatchTolerance) * best)
+                            {
+                                candidates.Add((k, j, i));
+                            }
+                        }
+                }
+            }
 
-            //map.Dispose();            
+            foreach (Mat map in maps)
+                map.Dispose();
 
-            //return candidates[rng.Next(candidates.Count)];           
+            (int ck, int cx, int cy) = candidates[rng.Next(candidates.Count)];
+
+            return new Mat(Sources[ck], new CvRect(cx, cy, BlockSize, BlockSize));
         }
     }
 }

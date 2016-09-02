@@ -7,7 +7,17 @@
         mc:Ignorable="d"
         Title="MainWindow" Height="350" Width="525">
     <Grid>
-        <Button x:Name="button" Content="Button" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Width="75" Click="button_Click"/>
-        <Image x:Name="image" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="99,10,10,10" RenderOptions.BitmapScalingMode="HighQuality"/>
+        <Border Width="100" HorizontalAlignment="Left">
+            <StackPanel Orientation="Vertical" Margin="5">
+                <Label x:Name="sourceDisplayTextBox">Sources: 0</Label>
+                <Button x:Name="loadSrcButton" Content="Load" Click="loadSrcButton_Click"/>
+                               
+                <Label Margin="0,15,0,0">Block size</Label>
+                <TextBox x:Name="blockSizeTextBox" TextAlignment="Right">32</TextBox>
+                <Button x:Name="quiltButton" Margin="0,5,0,0" Content="Quilt" Click="quiltButton_Click" />
+
+            </StackPanel>
+        </Border>
+        <Image x:Name="image" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="110,10,10,10" RenderOptions.BitmapScalingMode="HighQuality"/>       
     </Grid>
 </Window>
