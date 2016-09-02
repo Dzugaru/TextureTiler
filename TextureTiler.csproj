@@ -103,6 +103,7 @@
     </ApplicationDefinition>
     <Compile Include="Quilter.cs" />
     <Compile Include="ViewModel.cs" />
+    <Compile Include="WangTiler.cs" />
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>

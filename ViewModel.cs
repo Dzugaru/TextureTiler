@@ -68,6 +68,11 @@ namespace TextureTiler
 
         async void Quilt()
         {
+            //DEBUG
+            var wangTiler = new WangTiler(3, 3, 31337);
+            return;
+
+
             foreach(var src in sources)
             {
                 if(BlockSize > src.Cols || BlockSize > src.Rows)
