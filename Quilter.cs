@@ -24,6 +24,11 @@ namespace TextureTiler
 
         public Mat Quilt { get { return quilt; } }
         public float CutError { get; private set; }
+
+        public void RngSeed(int seed)
+        {
+            rng = new Random(seed);
+        }
         
         public void StartAndFinish(int w, int h, int rngSeed = -1)
         {
@@ -40,7 +45,9 @@ namespace TextureTiler
             qh = h;
             qx = qy = 0;           
             step = BlockSize - Overlap;
-            quilt = new Mat(Overlap + step * h, Overlap + step * w, MatType.CV_32FC3);            
+            
+            //new Scalar(0) is essential cause of BlendByMask blending to top-left row
+            quilt = new Mat(Overlap + step * h, Overlap + step * w, MatType.CV_32FC3, new Scalar(0)); 
         }
 
         public bool Step()
@@ -95,7 +102,7 @@ namespace TextureTiler
         }
 
         void QuiltBlock(Mat top, Mat left, Mat block)
-        {           
+        {          
             Mat maskTopLeft = null;
 
             Mat bTop = new Mat(block, new CvRect(0, 0, BlockSize, Overlap));
@@ -124,7 +131,6 @@ namespace TextureTiler
 
             //Fixing left
             Mat maskLeft;
-
             if (left != null)
             {
                 (maskLeft, cutErr) = GetMinCutMask(left, bLeft, true);
@@ -177,15 +183,13 @@ namespace TextureTiler
 
             Mat bChVec = b.Reshape(1, b.Rows * b.Cols);
             Mat errVec = bChVec.Reduce(OpenCvSharp.ReduceDimension.Column, OpenCvSharp.ReduceOperation.Sum, -1);
-            Mat err = errVec.Reshape(1, b.Rows);
+            Mat err = errVec.Reshape(1, b.Rows).Clone();
 
             bChVec.Dispose();
             errVec.Dispose();
             b.Dispose();
 
             //GC.Collect();
-
-
 
             return err;
             //return b1.Clone();
@@ -207,7 +211,6 @@ namespace TextureTiler
         (Mat mask, float cutErr) GetMinCutMask(Mat b1, Mat b2, bool vert)
         {
             float cutErr = 0;
-            Mat mask = new Mat(BlockSize, Overlap, MatType.CV_32FC1, new Scalar(0));
 
             Mat error = OverlapErrorSurface(b1, b2, vert);
             if (!vert) Cv2.Transpose(error, error);
@@ -216,58 +219,54 @@ namespace TextureTiler
             for (int i = 0; i < BlockSize; i++)
                 mins[i + 1, 0] = mins[i + 1, Overlap + 1] = float.MaxValue;
 
-            unsafe
-            {
-                System.Diagnostics.Debug.Assert(error.IsContinuous());
-                System.Diagnostics.Debug.Assert(mask.IsContinuous());
+            float[,] mData = new float[BlockSize, Overlap];
+            float[,] mMask = new float[BlockSize, Overlap];
+            error.GetArray(0, 0, mData);
 
-                float* pData = (float*)error.Data;
-                float* pMask = (float*)mask.Data;
-
-                //Fill mins
-                for (int i = 0; i < BlockSize; i++)
-                    for (int j = 0; j < Overlap; j++)
-                    {
-                        float e = *(pData + i * Overlap + j);
-                        mins[i + 1, j + 1] = e + Math.Min(Math.Min(mins[i, j], mins[i, j + 1]), mins[i, j + 2]);
-                    }
-
-                //Backtrack and fill mask  
-                int x = 0;
-                float min = float.MaxValue;
+            //Fill mins
+            for (int i = 0; i < BlockSize; i++)
                 for (int j = 0; j < Overlap; j++)
-                    if (mins[BlockSize, j + 1] < min)
-                    {
-                        min = mins[BlockSize, j + 1];
-                        x = j;
-                    }
-
-                cutErr = min;
-
-                for (int i = BlockSize - 1; i >= 0; i--)
                 {
-                    if (SeamSmooth == 0)
-                    {
-                        for (int j = x; j < Overlap; j++)
-                            *(pMask + i * Overlap + j) = 1.0f;
-                    }
-                    else
-                    {
-                        for (int j = 0; j < Overlap; j++)
-                            *(pMask + i * Overlap + j) = 1f / (1 + (float)Math.Exp(-(j - x) / (SeamSmooth * Overlap)));
-                    }
-
-                    float l = mins[i, x];
-                    float c = mins[i, x + 1];
-                    float r = mins[i, x + 2];
-
-                    if (l < c && l < r) x--;
-                    else if (r < c && r < l) x++;
+                    float e = mData[i, j];
+                    mins[i + 1, j + 1] = e + Math.Min(Math.Min(mins[i, j], mins[i, j + 1]), mins[i, j + 2]);
                 }
+
+            //Backtrack and fill mask  
+            int x = 0;
+            float min = float.MaxValue;
+            for (int j = 0; j < Overlap; j++)
+                if (mins[BlockSize, j + 1] < min)
+                {
+                    min = mins[BlockSize, j + 1];
+                    x = j;
+                }
+
+            cutErr = min;  
+
+            for (int i = BlockSize - 1; i >= 0; i--)
+            {
+                if (SeamSmooth == 0)
+                {
+                    for (int j = x; j < Overlap; j++)
+                        mMask[i, j] = 1.0f;
+                }
+                else
+                {
+                    for (int j = 0; j < Overlap; j++)
+                        mMask[i, j] = 1f / (1 + (float)Math.Exp(-(j - x) / (SeamSmooth * Overlap)));
+                }
+
+                float l = mins[i, x];
+                float c = mins[i, x + 1];
+                float r = mins[i, x + 2];
+
+                if (l < c && l < r) x--;
+                else if (r < c && r < l) x++;
             }
 
             error.Dispose();
 
+            Mat mask = new Mat(BlockSize, Overlap, MatType.CV_32FC1, mMask);
             if (!vert) Cv2.Transpose(mask, mask);
 
             //GC.Collect();

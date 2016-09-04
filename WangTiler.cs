@@ -140,32 +140,36 @@ namespace TextureTiler
             //Cv2.ImShow("Test", img);
         }
 
-        public List<Mat> GenerateTiles(Quilter quilter, int size, float overlapQuotient, int nIter)
+        public async Task<List<Mat>> GenerateTiles(Quilter quilter, int size, float overlapQuotient, int nIter)
         {
             int qSize = (int)Math.Round(Math.Sqrt(2) * size);
             int overlap =  (int)Math.Round(qSize / (2 - overlapQuotient) * overlapQuotient);
-            if ((qSize + overlap % 2) == 1) overlap++;
+            if ((qSize + overlap) % 2 == 1) overlap++;
             int bs = (qSize + overlap) / 2;
-
             quilter.BlockSize = bs;
-            quilter.Overlap = overlap; 
+            quilter.Overlap = overlap;
+
+            //DEBUG
+            quilter.RngSeed(42);
 
             float minCutErr = float.MaxValue;
-            //List<Mat> bestTiles = null;
+            List<Mat> bestTiles = null;
 
             for (int k = 0; k < nIter; k++)
             {
-                float cutErr = 0;
+                float cutErr = 0;                
 
-                //List<Mat> currTiles = new List<Mat>();
+                List<Mat> currTiles = new List<Mat>();
                 List<Mat> vert = new List<Mat>(), horiz = new List<Mat>();
                 for (int i = 0; i < vertColors; i++)
                     vert.Add(quilter.GetRandomBlock());
                 for (int i = 0; i < horizColors; i++)
                     horiz.Add(quilter.GetRandomBlock());
 
-                foreach (var tile in tiles)
+                for (int i = 0; i < tiles.Count; i++)
                 {
+                    var tile = tiles[i];   
+
                     quilter.Start(2, 2);
                     quilter.Step(horiz[tile.L]);
                     quilter.Step(vert[tile.T]);
@@ -173,53 +177,128 @@ namespace TextureTiler
                     quilter.Step(horiz[tile.R]);
 
                     cutErr += quilter.CutError;
-                    quilter.Quilt.Dispose();
-                    //currTiles.Add(quilter.Quilt);
+                    currTiles.Add(quilter.Quilt);
+
+                    //if (float.IsInfinity(cutErr) || cutErr > 5000)
+                    //{
+
+                    //}
                 }
 
-                //if(cutErr < minCutErr)
-                //{
-                //    minCutErr = cutErr;
-                //    if (bestTiles != null)
-                //        foreach (var m in bestTiles)
-                //            m.Dispose();
-                //    bestTiles = currTiles;
-                //}
-                //else
-                //{
-                //    foreach (var m in currTiles)
-                //        m.Dispose();                   
-                //}
+                if (cutErr < minCutErr)
+                {
+                    minCutErr = cutErr;
+                    if (bestTiles != null)
+                        foreach (var m in bestTiles)
+                            m.Dispose();
+                    bestTiles = currTiles;
+                }
+                else
+                {
+                    foreach (var m in currTiles)
+                        m.Dispose();
+                }
 
-                if(k % 10 == 0)
+                //if (k % 10 == 0)
                     System.Diagnostics.Debug.WriteLine($"{minCutErr} {cutErr}");
 
                 foreach (var m in vert) m.Dispose();
                 foreach (var m in horiz) m.Dispose();
-
-                //GC.Collect(3, GCCollectionMode.Forced, true);
-                //await Task.Delay(1);
+                
+                await Task.Delay(1);
             }
 
-            //List<Mat> turned = new List<Mat>();
+            List<Mat> turned = new List<Mat>();
 
-            Console.WriteLine("123123");
+            //Remapping
+            float[,] mapx = new float[size, size];
+            float[,] mapy = new float[size, size];
 
-            //foreach (var m in bestTiles)
+            float dxy = (0.5f * qSize - 0.5f * overlap) / size; //TODO: why not size + 1?
+            float x0 = 0.5f * qSize;
+            float y0 = 0.5f * overlap;
+
+            for (int i = 0; i < size; i++)
+            {
+                for (int j = 0; j < size; j++)
+                {
+                    mapx[i, j] = x0 + j * dxy;
+                    mapy[i, j] = y0 + j * dxy;
+                }
+
+                x0 -= dxy;
+                y0 += dxy;
+            }
+
+            Mat mMapx = new Mat(size, size, MatType.CV_32FC1, mapx);
+            Mat mMapy = new Mat(size, size, MatType.CV_32FC1, mapy);
+
+            foreach (var m in bestTiles)
+            {
+                Mat tm = new Mat(size, size, MatType.CV_32FC3);
+                Cv2.Remap(m, tm, mMapx, mMapy, OpenCvSharp.Interpolation.Cubic, OpenCvSharp.BorderType.Wrap);
+                turned.Add(tm);
+                m.Dispose();
+
+                //Mat trans = Cv2.GetRotationMatrix2D(new Point2f(0.5f * qSize, 0.5f * qSize), 45, 1);
+                //trans.Set<double>(0, 2, trans.At<double>(0, 2) - 0.5 * (qSize - size));
+                //trans.Set<double>(1, 2, trans.At<double>(1, 2) - 0.5 * (qSize - size));
+                //Mat tm = new Mat();
+                //Cv2.WarpAffine(m, tm, trans, new CvSize(size, size), OpenCvSharp.Interpolation.Linear);
+
+
+                //
+                //trans.Dispose();
+            }
+
+            mMapx.Dispose();
+            mMapy.Dispose();
+
+            return turned;            
+        }
+
+        public Mat FitTiles(int w, int h, int size, List<Mat> tileImgs)
+        {
+            Mat result = new Mat(h * size, w * size, MatType.CV_32FC3);
+            int[,] map = new int[h, w];
+
+            for (int i = 0; i < h; i++)
+                for (int j = 0; j < w; j++)
+                {
+                    int l = -1, t = -1;
+                    if (i > 0) t = tiles[map[i - 1, j]].B;
+                    if (j > 0) l = tiles[map[i, j - 1]].R;
+
+                    var cand = tiles.Select((x, k) => (tile: x, idx: k))
+                        .Where(x => (l == -1 || x.tile.L == l) && (t == -1 || x.tile.T == t))
+                        .Select(x => x.idx).ToList();
+                    map[i, j] = cand[NextRandom(cand.Count)];
+                }
+
+            //Scalar[] colors = new[]
             //{
-            //    Mat trans = Cv2.GetRotationMatrix2D(new Point2f(0.5f * qSize, 0.5f * qSize), -45, 1);
-            //    trans.Set<double>(0, 2, trans.At<double>(0, 2) - 0.5 * (qSize - size));
-            //    trans.Set<double>(1, 2, trans.At<double>(1, 2) - 0.5 * (qSize - size));
-            //    Mat tm = new Mat();
-            //    Cv2.WarpAffine(m, tm, trans, new CvSize(size, size), OpenCvSharp.Interpolation.Linear);
+            //    new Scalar(0,0,255),
+            //    new Scalar(0,255,0),
+            //    new Scalar(255,0,0),
+            //    new Scalar(128,128,0),
+            //    new Scalar(128,0,128),
+            //    new Scalar(0,128,128)
+            //};
 
-            //    turned.Add(tm);
-            //    m.Dispose();
-            //    trans.Dispose();
-            //}
+            for (int i = 0; i < h; i++)
+                for (int j = 0; j < w; j++)
+                {
+                    Mat dst = new Mat(result, new CvRect(j * size, i * size, size, size));
+                    //WangTile tile = tiles[map[i, j]];
+                    tileImgs[map[i, j]].CopyTo(dst);
+                    //Cv2.FillPoly(dst, new[] { new[] { new CvPoint(0, 0), new CvPoint(0.5 * size, 0.5 * size), new CvPoint(0, size) } }, colors[tile.L]);
+                    //Cv2.FillPoly(dst, new[] { new[] { new CvPoint(size, 0), new CvPoint(size, size), new CvPoint(0.5 * size, 0.5 * size) } }, colors[tile.R]);
+                    //Cv2.FillPoly(dst, new[] { new[] { new CvPoint(0, 0), new CvPoint(size, 0), new CvPoint(0.5 * size, 0.5 * size) } }, colors[horizColors + tile.T]);
+                    //Cv2.FillPoly(dst, new[] { new[] { new CvPoint(0, size), new CvPoint(0.5 * size, 0.5 * size), new CvPoint(size, size) } }, colors[horizColors + tile.B]);
+                    dst.Dispose();
+                }
 
-            //return turned;
-            return null;
+            return result;
         }
     }
 }
