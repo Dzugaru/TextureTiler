@@ -47,6 +47,8 @@
                 </Grid>
                 <Button x:Name="quiltButton" Margin="0,5,0,0" Content="Quilt" Command="{Binding QuiltCommand}" />
 
+                <Button Margin="0,5,0,0" Content="GCCOLLECT" Click="Button_Click" />
+
             </StackPanel>
         </Border>
         <Image Source="{Binding Result}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Grid.Column="1" Margin="5" RenderOptions.BitmapScalingMode="HighQuality"/>

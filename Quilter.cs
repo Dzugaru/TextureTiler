@@ -13,7 +13,7 @@ namespace TextureTiler
     class Quilter
     {
         int step, qw, qh, qx, qy;
-        Mat quilt;
+        Mat quilt;      
 
         Random rng = new Random();
         public int BlockSize { get; set; } = 32;
@@ -23,7 +23,8 @@ namespace TextureTiler
         public List<Mat> Sources { get; set; } = new List<Mat>();
 
         public Mat Quilt { get { return quilt; } }
-
+        public float CutError { get; private set; }
+        
         public void StartAndFinish(int w, int h, int rngSeed = -1)
         {
             Start(w, h, rngSeed);
@@ -33,12 +34,13 @@ namespace TextureTiler
         public void Start(int w, int h, int rngSeed = -1)
         {
             if (rngSeed >= 0) rng = new Random(rngSeed);
+            CutError = 0;
 
             qw = w;
             qh = h;
             qx = qy = 0;           
             step = BlockSize - Overlap;
-            quilt = new Mat(Overlap + step * h, Overlap + step * w, MatType.CV_32FC3);
+            quilt = new Mat(Overlap + step * h, Overlap + step * w, MatType.CV_32FC3);            
         }
 
         public bool Step()
@@ -50,8 +52,50 @@ namespace TextureTiler
             if (qx == 0) left = null;
             else left = new Mat(quilt, new CvRect(qx * step, qy * step, Overlap, BlockSize));
 
-
             Mat block = GetMatchingBlock(left, top, OpenCvSharp.MatchTemplateMethod.SqDiff);
+            bool notEnded = Step(block);
+
+            block.Dispose();
+            if (top != null) top.Dispose();
+            if (left != null) left.Dispose();
+
+            return notEnded;
+        }
+
+        public bool Step(Mat block)
+        {
+            Mat top, left;
+            if (qy == 0) top = null;
+            else top = new Mat(quilt, new CvRect(qx * step, qy * step, BlockSize, Overlap));
+
+            if (qx == 0) left = null;
+            else left = new Mat(quilt, new CvRect(qx * step, qy * step, Overlap, BlockSize));            
+
+            QuiltBlock(top, left, block);
+
+            if (top != null) top.Dispose();
+            if (left != null) left.Dispose();            
+
+            qx++;
+            if (qx >= qw)
+            {
+                qx = 0;
+                qy++;
+                if (qy >= qh) return false;
+            }
+            return true;
+        }        
+
+        public Mat GetRandomBlock()
+        {
+            Mat src = Sources[rng.Next(Sources.Count)];
+            int x = rng.Next(src.Cols - BlockSize + 1);
+            int y = rng.Next(src.Rows - BlockSize + 1);
+            return new Mat(src, new CvRect(x, y, BlockSize, BlockSize));
+        }
+
+        void QuiltBlock(Mat top, Mat left, Mat block)
+        {           
             Mat maskTopLeft = null;
 
             Mat bTop = new Mat(block, new CvRect(0, 0, BlockSize, Overlap));
@@ -59,15 +103,19 @@ namespace TextureTiler
 
             //Fixing up
             Mat maskTop;
+            float cutErr;
             if (top != null)
-                maskTop = GetMinCutMask(top, bTop, false);
+            {
+                (maskTop, cutErr) = GetMinCutMask(top, bTop, false);
+                CutError += cutErr;
+            }
             else
                 maskTop = new Mat(Overlap, BlockSize, MatType.CV_32FC1, new Scalar(1));
             Mat maskTopRight = new Mat(maskTop, new CvRect(Overlap, 0, step, Overlap));
-            maskTopLeft = new Mat(maskTop, new CvRect(0, 0, Overlap, Overlap));           
+            maskTopLeft = new Mat(maskTop, new CvRect(0, 0, Overlap, Overlap));
 
             Mat bTopRight = new Mat(bTop, new CvRect(Overlap, 0, step, Overlap));
-            Mat topRight = new Mat(quilt, new CvRect(qx * step + Overlap, qy * step, step, Overlap));            
+            Mat topRight = new Mat(quilt, new CvRect(qx * step + Overlap, qy * step, step, Overlap));
             BlendByMask(topRight, bTopRight, maskTopRight);
             bTopRight.Dispose();
             topRight.Dispose();
@@ -76,14 +124,18 @@ namespace TextureTiler
 
             //Fixing left
             Mat maskLeft;
+
             if (left != null)
-                maskLeft = GetMinCutMask(left, bLeft, true);
+            {
+                (maskLeft, cutErr) = GetMinCutMask(left, bLeft, true);
+                CutError += cutErr;
+            }
             else
                 maskLeft = new Mat(BlockSize, Overlap, MatType.CV_32FC1, new Scalar(1));
-            Mat maskLeftBottom = new Mat(maskLeft, new CvRect(0, Overlap, Overlap, step));           
+            Mat maskLeftBottom = new Mat(maskLeft, new CvRect(0, Overlap, Overlap, step));
 
             Mat bLeftBottom = new Mat(bLeft, new CvRect(0, Overlap, Overlap, step));
-            Mat leftBottom = new Mat(quilt, new CvRect(qx * step, qy * step + Overlap, Overlap, step));            
+            Mat leftBottom = new Mat(quilt, new CvRect(qx * step, qy * step + Overlap, Overlap, step));
             BlendByMask(leftBottom, bLeftBottom, maskLeftBottom);
 
             Mat maskLeftTop = new Mat(maskLeft, new CvRect(0, 0, Overlap, Overlap));
@@ -96,7 +148,7 @@ namespace TextureTiler
 
             //Fixing corner
             Mat bTopLeft = new Mat(block, new CvRect(0, 0, Overlap, Overlap));
-            Mat topLeft = new Mat(quilt, new CvRect(qx * step, qy * step, Overlap, Overlap));            
+            Mat topLeft = new Mat(quilt, new CvRect(qx * step, qy * step, Overlap, Overlap));
             BlendByMask(topLeft, bTopLeft, maskTopLeft);
 
             bTopLeft.Dispose();
@@ -110,21 +162,10 @@ namespace TextureTiler
             bBottomRight.Dispose();
             bottomRight.Dispose();
 
-            if (top != null) top.Dispose();
-            if (left != null) left.Dispose();
-
-            block.Dispose();
             bTop.Dispose();
-            bLeft.Dispose();            
+            bLeft.Dispose();
 
-            qx++;
-            if(qx >= qw)
-            {
-                qx = 0;
-                qy++;
-                if (qy >= qh) return false;
-            }
-            return true;
+            //GC.Collect();          
         }
 
         Mat OverlapErrorSurface(Mat b1, Mat b2, bool vert, int x = 0, int y = 0)
@@ -142,7 +183,12 @@ namespace TextureTiler
             errVec.Dispose();
             b.Dispose();
 
+            //GC.Collect();
+
+
+
             return err;
+            //return b1.Clone();
         }
 
         void BlendByMask(Mat dst, Mat src, Mat mask)
@@ -158,11 +204,13 @@ namespace TextureTiler
             multichannelMask.Dispose();
         }
 
-        Mat GetMinCutMask(Mat b1, Mat b2, bool vert)
-        {            
+        (Mat mask, float cutErr) GetMinCutMask(Mat b1, Mat b2, bool vert)
+        {
+            float cutErr = 0;
+            Mat mask = new Mat(BlockSize, Overlap, MatType.CV_32FC1, new Scalar(0));
+
             Mat error = OverlapErrorSurface(b1, b2, vert);
             if (!vert) Cv2.Transpose(error, error);
-            Mat mask = new Mat(BlockSize, Overlap, MatType.CV_32FC1, new Scalar(0));
 
             float[,] mins = new float[BlockSize + 1, Overlap + 2];
             for (int i = 0; i < BlockSize; i++)
@@ -194,8 +242,10 @@ namespace TextureTiler
                         x = j;
                     }
 
+                cutErr = min;
+
                 for (int i = BlockSize - 1; i >= 0; i--)
-                {                    
+                {
                     if (SeamSmooth == 0)
                     {
                         for (int j = x; j < Overlap; j++)
@@ -219,17 +269,16 @@ namespace TextureTiler
             error.Dispose();
 
             if (!vert) Cv2.Transpose(mask, mask);
-            return mask;
+
+            //GC.Collect();
+            return (mask, cutErr);
         }
 
         Mat GetMatchingBlock(Mat left, Mat top, OpenCvSharp.MatchTemplateMethod matchMethod)
         {
             if (left == null && top == null)
             {
-                Mat src = Sources[rng.Next(Sources.Count)];
-                int x = rng.Next(src.Cols - BlockSize + 1);
-                int y = rng.Next(src.Rows - BlockSize + 1);
-                return new Mat(src, new CvRect(x, y, BlockSize, BlockSize));
+                return GetRandomBlock();
             }          
             
             bool isMin = matchMethod == OpenCvSharp.MatchTemplateMethod.SqDiff || matchMethod == OpenCvSharp.MatchTemplateMethod.SqDiffNormed;

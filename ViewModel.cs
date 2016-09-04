@@ -14,6 +14,9 @@ using Prism.Commands;
 using System.Windows.Media;
 using System.Windows;
 
+using CvPoint = OpenCvSharp.CPlusPlus.Point;
+using CvSize = OpenCvSharp.CPlusPlus.Size;
+
 namespace TextureTiler
 {
     class ViewModel : BindableBase
@@ -66,46 +69,83 @@ namespace TextureTiler
             }
         }
 
-        async void Quilt()
+        void Quilt()
         {
+            //for (;;)
+            //{
+            //    Mat b1 = new Mat(16, 16, MatType.CV_32FC3, new Scalar(1, 1, 1));
+            //    Mat b2 = new Mat(16, 16, MatType.CV_32FC3, new Scalar(1, 1, 1));
+            //    Mat b = new Mat(16, 16, MatType.CV_32FC3, new Scalar(1, 1, 1));
+            //    Cv2.Subtract(b1, b2, b);
+
+            //    b1.Dispose();
+            //    b2.Dispose();
+            //    b.Dispose();
+
+            //    //GC.Collect();
+            //}
+
+            //int size = 64;
+            //int qSize = (int)Math.Round(Math.Sqrt(2) * size);
+            //Mat m = new Mat(qSize, qSize, MatType.CV_32FC3, new Scalar(255,0,0));
+            //Cv2.FillPoly(m, new[] { new[] { new CvPoint(0.5f * qSize, 0), new CvPoint(qSize, 0.5f * qSize), new CvPoint(0.5f * qSize, qSize), new CvPoint(0, 0.5f * qSize) } }, new Scalar(0, 0, 255));
+
+            //Mat trans = Cv2.GetRotationMatrix2D(new Point2f(0.5f * qSize, 0.5f * qSize), -45, 1);           
+            //trans.Set<double>(0, 2, trans.At<double>(0, 2) - 0.5 * (qSize - size));
+            //trans.Set<double>(1, 2, trans.At<double>(1, 2) - 0.5 * (qSize - size));
+            //Mat tm = new Mat();
+            //Cv2.WarpAffine(m, tm, trans, new CvSize(size, size), OpenCvSharp.Interpolation.Linear);
+
+            //Cv2.ImShow("Test", tm);
+
             //DEBUG
             var wangTiler = new WangTiler(3, 3, 31337);
+            var q = new Quilter();           
+            q.Sources = sources;
+
+            //System.Threading.Thread th = new System.Threading.Thread(new System.Threading.ThreadStart(() =>
+            //{
+            wangTiler.GenerateTiles(q, BlockSize, 1f / 6, 1000000);
+            //}
+            //));
+            //th.Start();   
+            
             return;
 
 
-            foreach(var src in sources)
-            {
-                if(BlockSize > src.Cols || BlockSize > src.Rows)
-                {
-                    MessageBox.Show("Block Size exceeds one of the source's size, please reduce Block Size or reload the sources.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-            }
+            //foreach(var src in sources)
+            //{
+            //    if(BlockSize > src.Cols || BlockSize > src.Rows)
+            //    {
+            //        MessageBox.Show("Block Size exceeds one of the source's size, please reduce Block Size or reload the sources.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            //        return;
+            //    }
+            //}
 
-            Quilter q = new Quilter();
-            //q.MatchTolerance = 100;
-            q.BlockSize = BlockSize;
-            q.Overlap = BlockSize / 6;
-            q.Sources = sources;
+            //Quilter q = new Quilter();
+            ////q.MatchTolerance = 100;
+            //q.BlockSize = BlockSize;
+            //q.Overlap = BlockSize / 6;
+            //q.Sources = sources;
 
            
 
-            int step = q.BlockSize - q.Overlap;
-            int qw = (Width - q.Overlap - 1) / step + 1;
-            int qh = (Height - q.Overlap - 1) / step + 1;
+            //int step = q.BlockSize - q.Overlap;
+            //int qw = (Width - q.Overlap - 1) / step + 1;
+            //int qh = (Height - q.Overlap - 1) / step + 1;
 
-            q.Start(qw, qh);
-            for (;;)
-            {
-                bool more = q.Step();
-                Mat quilted8U = new Mat();
-                q.Quilt.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
-                WriteableBitmap quiltedBmp = quilted8U.ToWriteableBitmap();
-                Result = quiltedBmp;
-                quilted8U.Dispose();
-                await Task.Delay(1);
-                if (!more) break;
-            }
+            //q.Start(qw, qh);
+            //for (;;)
+            //{
+            //    bool more = q.Step();
+            //    Mat quilted8U = new Mat();
+            //    q.Quilt.ConvertTo(quilted8U, MatType.CV_8UC3, 255.0);
+            //    WriteableBitmap quiltedBmp = quilted8U.ToWriteableBitmap();
+            //    Result = quiltedBmp;
+            //    quilted8U.Dispose();
+            //    await Task.Delay(1);
+            //    if (!more) break;
+            //}
         }
     }
 

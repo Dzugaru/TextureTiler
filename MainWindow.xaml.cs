@@ -23,6 +23,7 @@ using System.IO;
 
 
 //TODO: using using for Mats?
+//TODO: Dispose not needed at all?
 namespace TextureTiler
 {
     /// <summary>
@@ -42,6 +43,11 @@ namespace TextureTiler
             mat.ConvertTo(sm, MatType.CV_8UC3, 255);
             sm.SaveImage(filename);
             sm.Dispose();
-        }       
+        }
+
+        private void Button_Click(object sender, RoutedEventArgs e)
+        {
+            //GC.Collect();
+        }
     }     
 }
