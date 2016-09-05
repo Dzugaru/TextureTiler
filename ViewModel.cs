@@ -101,7 +101,7 @@ namespace TextureTiler
             //DEBUG
             //int size = 64;
             //int qSize = (int)Math.Round(Math.Sqrt(2) * size);
-            
+
             //Mat m = new Mat(qSize, qSize, MatType.CV_32FC3, new Scalar(255,0,0));
             //Cv2.FillPoly(m, new[] { new[] { new CvPoint(0.5f * qSize, 10), new CvPoint(qSize - 10, 0.5f * qSize), new CvPoint(0.5f * qSize, qSize - 10), new CvPoint(10, 0.5f * qSize) } }, new Scalar(0, 0, 255));
 

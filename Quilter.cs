@@ -20,6 +20,7 @@ namespace TextureTiler
         public int Overlap { get; set; } = 5;
         public float MatchTolerance { get; set; } = 0.1f;
         public float SeamSmooth { get; set; } = 0.1f;
+        public bool WangMode { get; set; } = false;
         public List<Mat> Sources { get; set; } = new List<Mat>();
 
         public Mat Quilt { get { return quilt; } }
@@ -222,6 +223,20 @@ namespace TextureTiler
             float[,] mData = new float[BlockSize, Overlap];
             float[,] mMask = new float[BlockSize, Overlap];
             error.GetArray(0, 0, mData);
+
+            if(WangMode)
+            {
+                for (int i = 0; i < Overlap / 2; i++)
+                {
+                    mData[i, Overlap / 2] = 0;
+                    mData[BlockSize - i - 1, Overlap / 2] = 0;
+                }
+                //for (int i = 0; i < BlockSize / 4; i++)
+                //{
+                //    mData[i, Overlap / 2] = -1;
+                //    mData[BlockSize - i - 1, Overlap / 2] = -1;
+                //}
+            }
 
             //Fill mins
             for (int i = 0; i < BlockSize; i++)

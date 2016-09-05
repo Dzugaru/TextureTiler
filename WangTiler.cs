@@ -148,6 +148,7 @@ namespace TextureTiler
             int bs = (qSize + overlap) / 2;
             quilter.BlockSize = bs;
             quilter.Overlap = overlap;
+            quilter.WangMode = true;
 
             //DEBUG
             quilter.RngSeed(42);
@@ -166,6 +167,7 @@ namespace TextureTiler
                 for (int i = 0; i < horizColors; i++)
                     horiz.Add(quilter.GetRandomBlock());
 
+                
                 for (int i = 0; i < tiles.Count; i++)
                 {
                     var tile = tiles[i];   
@@ -178,6 +180,12 @@ namespace TextureTiler
 
                     cutErr += quilter.CutError;
                     currTiles.Add(quilter.Quilt);
+
+                    if(cutErr >= minCutErr)
+                    {
+                        
+                        break;
+                    }
 
                     //if (float.IsInfinity(cutErr) || cutErr > 5000)
                     //{
@@ -196,10 +204,10 @@ namespace TextureTiler
                 else
                 {
                     foreach (var m in currTiles)
-                        m.Dispose();
+                        m.Dispose();                    
                 }
 
-                //if (k % 10 == 0)
+                if (k % 100 == 0)
                     System.Diagnostics.Debug.WriteLine($"{minCutErr} {cutErr}");
 
                 foreach (var m in vert) m.Dispose();
