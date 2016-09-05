@@ -148,7 +148,7 @@ namespace TextureTiler
             //}
             //));
             //th.Start();
-            Mat result = wangTiler.FitTiles(8, 8, BlockSize, tiles);
+            Mat result = wangTiler.FitTiles(16, 16, BlockSize, tiles);
 
             //Cv2.ImShow("Test", result);
             Mat quilted8U = new Mat();

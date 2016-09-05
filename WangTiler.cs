@@ -142,10 +142,13 @@ namespace TextureTiler
 
         public async Task<List<Mat>> GenerateTiles(Quilter quilter, int size, float overlapQuotient, int nIter)
         {
-            int qSize = (int)Math.Round(Math.Sqrt(2) * size);
-            int overlap =  (int)Math.Round(qSize / (2 - overlapQuotient) * overlapQuotient);
-            if ((qSize + overlap) % 2 == 1) overlap++;
+            int qSize = (int)(Math.Sqrt(2) * size);
+            if (qSize % 2 == 0) qSize++;
+            int overlap =  (int)(qSize / (2 - overlapQuotient) * overlapQuotient);
+            if (overlap % 2 == 0) overlap++;
             int bs = (qSize + overlap) / 2;
+            int sSize = bs + overlap / 2;
+
             quilter.BlockSize = bs;
             quilter.Overlap = overlap;
             quilter.WangMode = true;
@@ -163,27 +166,30 @@ namespace TextureTiler
                 List<Mat> currTiles = new List<Mat>();
                 List<Mat> vert = new List<Mat>(), horiz = new List<Mat>();
                 for (int i = 0; i < vertColors; i++)
-                    vert.Add(quilter.GetRandomBlock());
+                    vert.Add(quilter.GetRandomBlock(sSize));
                 for (int i = 0; i < horizColors; i++)
-                    horiz.Add(quilter.GetRandomBlock());
-
+                    horiz.Add(quilter.GetRandomBlock(sSize));
                 
                 for (int i = 0; i < tiles.Count; i++)
                 {
                     var tile = tiles[i];   
 
                     quilter.Start(2, 2);
-                    quilter.Step(horiz[tile.L]);
-                    quilter.Step(vert[tile.T]);
-                    quilter.Step(vert[tile.B]);
-                    quilter.Step(horiz[tile.R]);
+                    Mat l = new Mat(horiz[tile.L], new CvRect(overlap / 2, overlap / 2, bs, bs));
+                    Mat t = new Mat(vert[tile.T], new CvRect(0, overlap / 2, bs, bs));
+                    Mat b = new Mat(vert[tile.B], new CvRect(overlap / 2, 0, bs, bs));
+                    Mat r = new Mat(horiz[tile.R], new CvRect(0, 0, bs, bs));
+
+                    quilter.Step(l); l.Dispose();
+                    quilter.Step(t); t.Dispose();
+                    quilter.Step(b); b.Dispose();
+                    quilter.Step(r); r.Dispose();
 
                     cutErr += quilter.CutError;
                     currTiles.Add(quilter.Quilt);
 
                     if(cutErr >= minCutErr)
                     {
-                        
                         break;
                     }
 
@@ -222,9 +228,12 @@ namespace TextureTiler
             float[,] mapx = new float[size, size];
             float[,] mapy = new float[size, size];
 
-            float dxy = (0.5f * qSize - 0.5f * overlap) / size; //TODO: why not size + 1?
+            //float dxy = (0.5f * qSize - 0.5f * overlap) / size; //TODO: why not size + 1?
+            //float x0 = 0.5f * qSize;
+            //float y0 = 0.5f * overlap;
+            float dxy = (0.5f * qSize - 0.5f) / size; //TODO: why not size + 1?
             float x0 = 0.5f * qSize;
-            float y0 = 0.5f * overlap;
+            float y0 = 0.5f;
 
             for (int i = 0; i < size; i++)
             {
@@ -247,16 +256,6 @@ namespace TextureTiler
                 Cv2.Remap(m, tm, mMapx, mMapy, OpenCvSharp.Interpolation.Cubic, OpenCvSharp.BorderType.Wrap);
                 turned.Add(tm);
                 m.Dispose();
-
-                //Mat trans = Cv2.GetRotationMatrix2D(new Point2f(0.5f * qSize, 0.5f * qSize), 45, 1);
-                //trans.Set<double>(0, 2, trans.At<double>(0, 2) - 0.5 * (qSize - size));
-                //trans.Set<double>(1, 2, trans.At<double>(1, 2) - 0.5 * (qSize - size));
-                //Mat tm = new Mat();
-                //Cv2.WarpAffine(m, tm, trans, new CvSize(size, size), OpenCvSharp.Interpolation.Linear);
-
-
-                //
-                //trans.Dispose();
             }
 
             mMapx.Dispose();
@@ -306,7 +305,17 @@ namespace TextureTiler
                     dst.Dispose();
                 }
 
-            return result;
+            Mat trans = Cv2.GetRotationMatrix2D(new Point2f(0.5f * result.Cols, 0.5f * result.Rows), -45, 1);
+            int rW = (int)(result.Cols * 0.5 * Math.Sqrt(2));
+            int rH = (int)(result.Rows * 0.5 * Math.Sqrt(2));
+            trans.Set<double>(0, 2, trans.At<double>(0, 2) - 0.5 * (result.Cols - rW));
+            trans.Set<double>(1, 2, trans.At<double>(1, 2) - 0.5 * (result.Rows - rH));
+            Mat tm = new Mat();
+            Cv2.WarpAffine(result, tm, trans, new CvSize(rW, rH), OpenCvSharp.Interpolation.Linear);
+            
+            result.Dispose();
+
+            return tm;
         }
     }
 }

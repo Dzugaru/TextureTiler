@@ -94,12 +94,14 @@ namespace TextureTiler
             return true;
         }        
 
-        public Mat GetRandomBlock()
+        public Mat GetRandomBlock(int size = -1)
         {
+            if (size < 0) size = BlockSize;
+
             Mat src = Sources[rng.Next(Sources.Count)];
-            int x = rng.Next(src.Cols - BlockSize + 1);
-            int y = rng.Next(src.Rows - BlockSize + 1);
-            return new Mat(src, new CvRect(x, y, BlockSize, BlockSize));
+            int x = rng.Next(src.Cols - size + 1);
+            int y = rng.Next(src.Rows - size + 1);
+            return new Mat(src, new CvRect(x, y, size, size));
         }
 
         void QuiltBlock(Mat top, Mat left, Mat block)
@@ -222,28 +224,22 @@ namespace TextureTiler
 
             float[,] mData = new float[BlockSize, Overlap];
             float[,] mMask = new float[BlockSize, Overlap];
-            error.GetArray(0, 0, mData);
-
-            if(WangMode)
-            {
-                for (int i = 0; i < Overlap / 2; i++)
-                {
-                    mData[i, Overlap / 2] = 0;
-                    mData[BlockSize - i - 1, Overlap / 2] = 0;
-                }
-                //for (int i = 0; i < BlockSize / 4; i++)
-                //{
-                //    mData[i, Overlap / 2] = -1;
-                //    mData[BlockSize - i - 1, Overlap / 2] = -1;
-                //}
-            }
+            error.GetArray(0, 0, mData);            
 
             //Fill mins
             for (int i = 0; i < BlockSize; i++)
                 for (int j = 0; j < Overlap; j++)
                 {
-                    float e = mData[i, j];
-                    mins[i + 1, j + 1] = e + Math.Min(Math.Min(mins[i, j], mins[i, j + 1]), mins[i, j + 2]);
+                    if (WangMode && ((i + j < Overlap / 2) || (i + (Overlap - j) <= Overlap / 2) ||
+                            ((BlockSize - i - 1) + j < Overlap / 2) || ((BlockSize - i - 1) + (Overlap - j) <= Overlap / 2)))
+                    {
+                        mins[i + 1, j + 1] = float.MaxValue;
+                    }
+                    else
+                    {
+                        float e = mData[i, j];
+                        mins[i + 1, j + 1] = e + Math.Min(Math.Min(mins[i, j], mins[i, j + 1]), mins[i, j + 2]);
+                    }
                 }
 
             //Backtrack and fill mask  
